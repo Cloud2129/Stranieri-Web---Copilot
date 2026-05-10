@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stranieri WEB - Copilot
 // @namespace    stranieri-web-copilot
-// @version      0.20.8
+// @version      0.20.9
 // @description  Assistente operativo per pratiche Stranieri WEB.
 // @author       Jurij Rella
 // @homepageURL  https://github.com/Cloud2129/Stranieri-Web---Copilot
@@ -529,6 +529,13 @@
     var importo = leggiImportoPagina();
     var mesiValidita = 0;
 
+    if (importo === "30,46" && tipoPraticaCorrente() === "A") {
+      impostaSelectPerValore("docSoggiorno", "L", "Documento di soggiorno impostato su PERM. SOGG. LUNGO PERIODO per aggiornamento con importo 30,46", fixes);
+      impostaValiditaSoggiorno("Y", "10 ANNI", "Validita soggiorno impostata su 10 ANNI per aggiornamento con importo 30,46", fixes);
+      ripetiValiditaSoggiorno("Y", "10 ANNI");
+      impostaScadenzaRinnovoDaDataPresentazione(120, fixes);
+    }
+
     if (importo === "130,46") {
       impostaSelectPerValore("docSoggiorno", "L", "Documento di soggiorno impostato su PERM. SOGG. LUNGO PERIODO per importo 130,46", fixes);
       impostaSelectPerValore("tipoPratica", "R", "Tipo pratica impostato su RINNOVO SOGGIORNO per importo 130,46", fixes);
@@ -564,6 +571,12 @@
 
   function normalizzaImporto(value) {
     return trim(value).replace(/\./g, "").replace(/\s/g, "");
+  }
+
+  function tipoPraticaCorrente() {
+    var tipo = document.getElementsByName("tipoPratica")[0] || document.getElementById("tipoPratica");
+    if (!tipo) return "";
+    return tipo.value || "";
   }
 
   function impostaSelectPerValore(name, value, avviso, fixes) {
@@ -690,6 +703,21 @@
     evidenzia(dataScadenzaRinnovo, "incollato");
     fire(dataScadenzaRinnovo);
     fixes.push("Data scadenza rinnovo calcolata da data rinnovo +10 anni per CARTA UE.");
+  }
+
+  function impostaScadenzaRinnovoDaDataPresentazione(mesi, fixes) {
+    var dataPresentazione = document.getElementsByName("dataPresentazione")[0] || document.getElementById("dataPresentazione");
+    var dataScadenzaRinnovo = document.getElementsByName("dataScadenzaRinnovo")[0] || document.getElementById("dataScadenzaRinnovo");
+    var base;
+
+    if (!dataPresentazione || !trim(dataPresentazione.value) || !dataScadenzaRinnovo) return;
+    base = parseDataItaliana(dataPresentazione.value);
+    if (!base) return;
+
+    dataScadenzaRinnovo.value = formattaDataItaliana(aggiungiMesi(base, mesi));
+    evidenzia(dataScadenzaRinnovo, "incollato");
+    fire(dataScadenzaRinnovo);
+    fixes.push("Data scadenza rinnovo calcolata da data presentazione +10 anni per aggiornamento 30,46.");
   }
 
   function parseDataItaliana(value) {
@@ -1234,6 +1262,11 @@
     var validita = document.getElementsByName("validitaSoggiorno")[0] || document.getElementById("validitaSoggiorno");
 
     if (!importo) return;
+    if (importo === "30,46" && tipo && tipo.value === "A") {
+      verificaSelectFinale(doc, "L", "PERM. SOGG. LUNGO PERIODO", "Importo 30,46 con aggiornamento: documento soggiorno non impostato su PERM. SOGG. LUNGO PERIODO.", critici, true);
+      verificaSelectFinale(validita, "Y", "10 ANNI", "Importo 30,46 con aggiornamento: validita soggiorno non impostata su 10 ANNI.", avvisi);
+      controllaScadenzaDaPresentazioneFinale(120, avvisi);
+    }
     if (importo === "130,46") {
       verificaSelectFinale(doc, "L", "PERM. SOGG. LUNGO PERIODO", "Importo 130,46: documento soggiorno non impostato su PERM. SOGG. LUNGO PERIODO.", critici, true);
       verificaSelectFinale(tipo, "R", "RINNOVO SOGGIORNO", "Importo 130,46: tipo pratica non impostato su RINNOVO SOGGIORNO.", avvisi);
@@ -1271,6 +1304,31 @@
     if (!dataScadenzaRinnovo || !trim(dataScadenzaRinnovo.value)) {
       avvisi.push("Tipo pratica rinnovo: data scadenza rinnovo non compilata.");
       if (dataScadenzaRinnovo) evidenziaAvviso(dataScadenzaRinnovo);
+    }
+  }
+
+  function controllaScadenzaDaPresentazioneFinale(mesi, avvisi) {
+    var dataPresentazione = document.getElementsByName("dataPresentazione")[0] || document.getElementById("dataPresentazione");
+    var dataScadenzaRinnovo = document.getElementsByName("dataScadenzaRinnovo")[0] || document.getElementById("dataScadenzaRinnovo");
+    var base;
+    var attesa;
+
+    if (!dataPresentazione || !trim(dataPresentazione.value)) {
+      avvisi.push("Data presentazione non compilata: impossibile verificare scadenza rinnovo.");
+      if (dataPresentazione) evidenziaAvviso(dataPresentazione);
+      return;
+    }
+    if (!dataScadenzaRinnovo || !trim(dataScadenzaRinnovo.value)) {
+      avvisi.push("Data scadenza rinnovo non compilata.");
+      if (dataScadenzaRinnovo) evidenziaAvviso(dataScadenzaRinnovo);
+      return;
+    }
+    base = parseDataItaliana(dataPresentazione.value);
+    if (!base) return;
+    attesa = formattaDataItaliana(aggiungiMesi(base, mesi));
+    if (trim(dataScadenzaRinnovo.value) !== attesa) {
+      avvisi.push("Data scadenza rinnovo non coerente con data presentazione +10 anni. Attesa: " + attesa + ".");
+      evidenziaAvviso(dataScadenzaRinnovo);
     }
   }
 
