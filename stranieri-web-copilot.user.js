@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stranieri WEB - Copilot
 // @namespace    stranieri-web-copilot
-// @version      0.21.8
+// @version      0.21.9
 // @description  Assistente operativo per pratiche Stranieri WEB.
 // @author       Jurij Rella
 // @homepageURL  https://github.com/Cloud2129/Stranieri-Web---Copilot
@@ -225,9 +225,9 @@
   }
 
   function logPrimaCopia(dati) {
-    var box = document.getElementById("autoacq_log");
+    var box = document.getElementById("autoacq_log_assicurata");
     if (!box) return;
-    box.innerHTML = "<div style=\"font-weight:700;margin-bottom:4px;color:#003b66;\">Dati da Assicurata</div>" +
+    box.innerHTML = "<div style=\"font-weight:700;margin-bottom:4px;color:#003b66;\">DATI ASSICURATA</div>" +
       "<div><strong>cognome</strong>: " + escapeHtml(dati.cognome) + "</div>" +
       "<div><strong>nome</strong>: " + escapeHtml(dati.nome) + "</div>" +
       "<div><strong>data nascita</strong>: " + escapeHtml(dati.giorno + "/" + dati.mese + "/" + dati.anno) + "</div>";
@@ -1686,12 +1686,14 @@
   }
 
   function svuotaBoxHud() {
-    var log = document.getElementById("autoacq_log");
+    var logAssicurata = document.getElementById("autoacq_log_assicurata");
+    var logGenerati = document.getElementById("autoacq_log_generati");
     var warn = document.getElementById("autoacq_warn");
     var fix = document.getElementById("autoacq_fix");
     var crit = document.getElementById("autoacq_crit");
 
-    if (log) log.innerHTML = "Log campi";
+    if (logAssicurata) logAssicurata.innerHTML = titoloLog("DATI ASSICURATA") + "<div style=\"color:#587089;\">In attesa di F1/F2.</div>";
+    if (logGenerati) logGenerati.innerHTML = titoloLog("DATI GENERATI") + "<div style=\"color:#587089;\">In attesa di incolla o controlli.</div>";
     if (warn) {
       warn.innerHTML = "";
       warn.style.display = "none";
@@ -1721,7 +1723,7 @@
   }
 
   function logCampi(titolo, campi, dati) {
-    var box = document.getElementById("autoacq_log");
+    var box = document.getElementById("autoacq_log_generati");
     var righe = [];
     var i;
     var key;
@@ -1733,11 +1735,11 @@
       valore = dati && dati[key] ? (dati[key].text || dati[key].value || "") : "";
       righe.push("<div><strong>" + escapeHtml(key) + "</strong>" + (valore ? ": " + escapeHtml(valore) : "") + "</div>");
     }
-    box.innerHTML = "<div style=\"font-weight:700;margin-bottom:4px;\">" + escapeHtml(titolo) + " (" + campi.length + ")</div>" + righe.join("");
+    box.innerHTML = titoloLog("DATI GENERATI") + "<div style=\"font-weight:700;margin-bottom:4px;\">" + escapeHtml(titolo) + " (" + campi.length + ")</div>" + righe.join("");
   }
 
   function logTecnico(info) {
-    var box = document.getElementById("autoacq_log");
+    var box = document.getElementById("autoacq_log_generati");
     var righe = [];
     var incollati = info.incollati || [];
     var nonTrovati = info.nonTrovati || [];
@@ -1748,6 +1750,7 @@
     var titolo = info.titolo || (info.modalita === "Con vecchia pratica" ? "Dati Incollati" : "Report lavorazione");
 
     if (!box) return;
+    righe.push(titoloLog("DATI GENERATI"));
     righe.push("<div style=\"font-weight:700;margin-bottom:5px;color:#003b66;\">" + escapeHtml(titolo) + "</div>");
     righe.push(rigaLog("Modalita", info.modalita || ""));
     righe.push(rigaLog("Stato", info.stato || ""));
@@ -1765,6 +1768,10 @@
 
   function rigaLog(label, value) {
     return "<div><strong>" + escapeHtml(label) + "</strong>: " + escapeHtml(value) + "</div>";
+  }
+
+  function titoloLog(testo) {
+    return "<div style=\"font-weight:700;margin-bottom:6px;color:#003b66;border-bottom:1px solid #d7e7f3;padding-bottom:4px;\">" + escapeHtml(testo) + "</div>";
   }
 
   function rigaListaLog(label, values) {
@@ -1938,6 +1945,27 @@
     return b;
   }
 
+  function creaPannelloLog(id, titolo, placeholder) {
+    var box = document.createElement("div");
+    box.id = id;
+    box.style.flex = "1 1 0";
+    box.style.minWidth = "0";
+    box.style.margin = "6px 8px 6px 0";
+    box.style.padding = "7px";
+    box.style.height = "261px";
+    box.style.maxHeight = "261px";
+    box.style.overflowY = "auto";
+    box.style.overflowX = "hidden";
+    box.style.background = "#ffffff";
+    box.style.border = "1px solid #c6dced";
+    box.style.borderRadius = "5px";
+    box.style.font = "12px Arial";
+    box.style.lineHeight = "1.35";
+    box.style.color = "#0f2f4a";
+    box.innerHTML = titoloLog(titolo) + "<div style=\"color:#587089;\">" + escapeHtml(placeholder) + "</div>";
+    return box;
+  }
+
   function salvaStatoHudRidotta(ridotta) {
     try {
       localStorage.setItem(HUD_MIN_KEY, ridotta ? "1" : "0");
@@ -2068,7 +2096,8 @@
     var header;
     var body;
     var content;
-    var log;
+    var logAssicurata;
+    var logGenerati;
     var warn;
     var fix;
     var crit;
@@ -2098,20 +2127,20 @@
     p.style.padding = "0";
     p.style.font = "13px Arial";
     p.style.boxShadow = "0 8px 22px rgba(0,59,102,0.25)";
-    p.style.width = "650px";
+    p.style.width = "720px";
     p.style.height = "500px";
-    p.style.minWidth = "650px";
-    p.style.maxWidth = "650px";
+    p.style.minWidth = "720px";
+    p.style.maxWidth = "720px";
     p.style.overflowX = "hidden";
     p.style.overflowY = "hidden";
 
     function impostaHudRidotta(ridotta) {
       content.style.display = ridotta ? "none" : "block";
       toggle.textContent = ridotta ? "+" : "-";
-      p.style.width = ridotta ? "430px" : "650px";
+      p.style.width = ridotta ? "430px" : "720px";
       p.style.height = ridotta ? "38px" : "500px";
-      p.style.minWidth = ridotta ? "430px" : "650px";
-      p.style.maxWidth = ridotta ? "430px" : "650px";
+      p.style.minWidth = ridotta ? "430px" : "720px";
+      p.style.maxWidth = ridotta ? "430px" : "720px";
       salvaStatoHudRidotta(ridotta);
       aggiornaAltezzaHud();
     }
@@ -2182,25 +2211,12 @@
     body.style.gap = "8px";
     body.style.height = "285px";
 
-    log = document.createElement("div");
-    log.id = "autoacq_log";
-    log.style.flex = "1 1 auto";
-    log.style.minWidth = "455px";
-    log.style.margin = "6px 8px 6px 0";
-    log.style.padding = "7px";
-    log.style.height = "261px";
-    log.style.maxHeight = "261px";
-    log.style.overflowY = "auto";
-    log.style.background = "#ffffff";
-    log.style.border = "1px solid #c6dced";
-    log.style.borderRadius = "5px";
-    log.style.font = "12px Arial";
-    log.style.lineHeight = "1.35";
-    log.style.color = "#0f2f4a";
-    log.appendChild(document.createTextNode("Log campi"));
+    logAssicurata = creaPannelloLog("autoacq_log_assicurata", "DATI ASSICURATA", "In attesa di F1/F2.");
+    logGenerati = creaPannelloLog("autoacq_log_generati", "DATI GENERATI", "In attesa di incolla o controlli.");
 
     body.appendChild(riga);
-    body.appendChild(log);
+    body.appendChild(logAssicurata);
+    body.appendChild(logGenerati);
     content.appendChild(body);
 
     m = document.createElement("span");
