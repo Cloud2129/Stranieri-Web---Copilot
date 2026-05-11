@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stranieri WEB - Copilot
 // @namespace    stranieri-web-copilot
-// @version      0.21.7
+// @version      0.21.8
 // @description  Assistente operativo per pratiche Stranieri WEB.
 // @author       Jurij Rella
 // @homepageURL  https://github.com/Cloud2129/Stranieri-Web---Copilot
@@ -227,7 +227,7 @@
   function logPrimaCopia(dati) {
     var box = document.getElementById("autoacq_log");
     if (!box) return;
-    box.innerHTML = "<div style=\"font-weight:700;margin-bottom:4px;\">1^ Copia</div>" +
+    box.innerHTML = "<div style=\"font-weight:700;margin-bottom:4px;color:#003b66;\">Dati da Assicurata</div>" +
       "<div><strong>cognome</strong>: " + escapeHtml(dati.cognome) + "</div>" +
       "<div><strong>nome</strong>: " + escapeHtml(dati.nome) + "</div>" +
       "<div><strong>data nascita</strong>: " + escapeHtml(dati.giorno + "/" + dati.mese + "/" + dati.anno) + "</div>";
@@ -1745,9 +1745,10 @@
     var critici = info.critici || [];
     var fixes = info.fixes || [];
     var anteprima = info.anteprima || [];
+    var titolo = info.titolo || (info.modalita === "Con vecchia pratica" ? "Dati Incollati" : "Report lavorazione");
 
     if (!box) return;
-    righe.push("<div style=\"font-weight:700;margin-bottom:5px;\">Report lavorazione</div>");
+    righe.push("<div style=\"font-weight:700;margin-bottom:5px;color:#003b66;\">" + escapeHtml(titolo) + "</div>");
     righe.push(rigaLog("Modalita", info.modalita || ""));
     righe.push(rigaLog("Stato", info.stato || ""));
     if (info.regola) righe.push(rigaLog("Regola", info.regola));
@@ -2097,20 +2098,20 @@
     p.style.padding = "0";
     p.style.font = "13px Arial";
     p.style.boxShadow = "0 8px 22px rgba(0,59,102,0.25)";
-    p.style.width = "390px";
+    p.style.width = "650px";
     p.style.height = "500px";
-    p.style.minWidth = "390px";
-    p.style.maxWidth = "390px";
+    p.style.minWidth = "650px";
+    p.style.maxWidth = "650px";
     p.style.overflowX = "hidden";
     p.style.overflowY = "hidden";
 
     function impostaHudRidotta(ridotta) {
       content.style.display = ridotta ? "none" : "block";
       toggle.textContent = ridotta ? "+" : "-";
-      p.style.width = ridotta ? "330px" : "390px";
+      p.style.width = ridotta ? "430px" : "650px";
       p.style.height = ridotta ? "38px" : "500px";
-      p.style.minWidth = ridotta ? "330px" : "390px";
-      p.style.maxWidth = ridotta ? "330px" : "390px";
+      p.style.minWidth = ridotta ? "430px" : "650px";
+      p.style.maxWidth = ridotta ? "430px" : "650px";
       salvaStatoHudRidotta(ridotta);
       aggiornaAltezzaHud();
     }
@@ -2169,10 +2170,10 @@
     if (leggiStatoHudRidotta()) {
       content.style.display = "none";
       toggle.textContent = "+";
-      p.style.width = "330px";
+      p.style.width = "430px";
       p.style.height = "38px";
-      p.style.minWidth = "330px";
-      p.style.maxWidth = "330px";
+      p.style.minWidth = "430px";
+      p.style.maxWidth = "430px";
     }
 
     body = document.createElement("div");
@@ -2183,7 +2184,8 @@
 
     log = document.createElement("div");
     log.id = "autoacq_log";
-    log.style.flex = "1";
+    log.style.flex = "1 1 auto";
+    log.style.minWidth = "455px";
     log.style.margin = "6px 8px 6px 0";
     log.style.padding = "7px";
     log.style.height = "261px";
