@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stranieri WEB - Copilot
 // @namespace    stranieri-web-copilot
-// @version      0.21.11
+// @version      0.21.12
 // @description  Assistente operativo per pratiche Stranieri WEB.
 // @author       Jurij Rella
 // @homepageURL  https://github.com/Cloud2129/Stranieri-Web---Copilot
@@ -17,6 +17,7 @@
 (function () {
   var KEY = "STRANIERI_WEB_COPILOT_DATI";
   var KEY_PRIMA_COPIA = "STRANIERI_WEB_COPILOT_PRIMA_COPIA";
+  var KEY_LOG_VECCHIA = "STRANIERI_WEB_COPILOT_LOG_VECCHIA";
   var HUD_POS_KEY = "STRANIERI_WEB_COPILOT_HUD_POS";
   var HUD_MIN_KEY = "STRANIERI_WEB_COPILOT_HUD_MIN";
   var CAMPI = {
@@ -290,6 +291,7 @@
     localStorage.setItem(KEY, JSON.stringify(dati));
     salvaValoriControllo(dati);
     localStorage.setItem(KEY, JSON.stringify(dati));
+    salvaLogVecchiaPratica(copiati, dati);
     msg("Copiati " + Object.keys(dati).length + " campi.");
     logCampi("Copiati", copiati, dati);
   }
@@ -426,6 +428,7 @@
       return;
     }
     dati = JSON.parse(raw);
+    ripristinaLogVecchiaPratica();
     logDatiAssicurataPrima(dati);
     incollaDataNascitaDiretta(dati, anteprima);
     applicaControlli(dati, fixes);
@@ -1687,6 +1690,7 @@
   function resetCopilot() {
     localStorage.removeItem(KEY);
     localStorage.removeItem(KEY_PRIMA_COPIA);
+    localStorage.removeItem(KEY_LOG_VECCHIA);
     pulisciEvidenziazioni();
     svuotaBoxHud();
     msg("Reset completato: dati e clipboard Stranieri WEB - Copilot svuotati.");
@@ -1698,6 +1702,7 @@
   function nuovaPratica() {
     localStorage.removeItem(KEY);
     localStorage.removeItem(KEY_PRIMA_COPIA);
+    localStorage.removeItem(KEY_LOG_VECCHIA);
     pulisciEvidenziazioni();
     svuotaBoxHud();
     msg("Nuova pratica: sessione operativa pulita.");
@@ -1765,6 +1770,42 @@
       righe.push("<div><strong>" + escapeHtml(key) + "</strong>" + (valore ? ": " + escapeHtml(valore) : "") + "</div>");
     }
     box.innerHTML = titoloLog("DATI VECCHIA PRATICA") + "<div style=\"font-weight:700;margin-bottom:4px;\">" + escapeHtml(titolo) + " (" + campi.length + ")</div>" + righe.join("");
+  }
+
+  function salvaLogVecchiaPratica(campi, dati) {
+    var snap = [];
+    var i;
+    var key;
+    var valore;
+
+    for (i = 0; i < campi.length; i = i + 1) {
+      key = campi[i];
+      valore = dati && dati[key] ? (dati[key].text || dati[key].value || "") : "";
+      snap.push({ key: key, value: valore });
+    }
+    localStorage.setItem(KEY_LOG_VECCHIA, JSON.stringify(snap));
+  }
+
+  function ripristinaLogVecchiaPratica() {
+    var raw = localStorage.getItem(KEY_LOG_VECCHIA);
+    var box = document.getElementById("autoacq_log_vecchia");
+    var snap;
+    var righe = [];
+    var i;
+
+    if (!box || !raw) return;
+    try {
+      snap = JSON.parse(raw);
+    } catch (e) {
+      return;
+    }
+    if (!snap || !snap.length) return;
+    for (i = 0; i < snap.length; i = i + 1) {
+      righe.push("<div><strong>" + escapeHtml(snap[i].key) + "</strong>" + (snap[i].value ? ": " + escapeHtml(snap[i].value) : "") + "</div>");
+    }
+    box.innerHTML = titoloLog("DATI VECCHIA PRATICA") +
+      "<div style=\"font-size:11px;color:#587089;margin-bottom:5px;\">Dati copiati con F3 dalla finestra della vecchia pratica.</div>" +
+      righe.join("");
   }
 
   function logTecnico(info) {
