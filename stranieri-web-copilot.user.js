@@ -3,9 +3,13 @@
 // @namespace    stranieri-web-copilot
 // @version      0.21.3
 // @description  Assistente operativo per pratiche Stranieri WEB.
-// @include      file:///*
-// @include      http://*/StranieriWeb/*
-// @include      https://*/StranieriWeb/*
+// @author       Jurij Rella
+// @homepageURL  https://github.com/Cloud2129/Stranieri-Web---Copilot
+// @supportURL   https://github.com/Cloud2129/Stranieri-Web---Copilot/issues
+// @updateURL    https://raw.githubusercontent.com/Cloud2129/Stranieri-Web---Copilot/main/stranieri-web-copilot.user.js
+// @downloadURL  https://raw.githubusercontent.com/Cloud2129/Stranieri-Web---Copilot/main/stranieri-web-copilot.user.js
+// @match        http://*/StranieriWeb/*
+// @match        https://*/StranieriWeb/*
 // @run-at       document-end
 // @grant        none
 // ==/UserScript==
@@ -94,7 +98,3 @@
     var txt;
 
     id = el.getAttribute("id");
-    if (id) {
-      label = document.querySelector("label[for='" + id.replace(/'/g, "\\'") + "']");
-      if (label) return trim(label.innerText || label.textContent);
-    }
