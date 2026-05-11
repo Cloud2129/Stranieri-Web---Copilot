@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stranieri WEB - Copilot
 // @namespace    stranieri-web-copilot
-// @version      0.21.9
+// @version      0.21.11
 // @description  Assistente operativo per pratiche Stranieri WEB.
 // @author       Jurij Rella
 // @homepageURL  https://github.com/Cloud2129/Stranieri-Web---Copilot
@@ -233,6 +233,32 @@
       "<div><strong>data nascita</strong>: " + escapeHtml(dati.giorno + "/" + dati.mese + "/" + dati.anno) + "</div>";
   }
 
+  function logDatiAssicurataPrima(datiVecchi) {
+    var box = document.getElementById("autoacq_log_assicurata");
+    var controls = allControls();
+    var righe = [];
+    var visti = {};
+    var i;
+    var el;
+    var key;
+    var value;
+
+    if (!box) return;
+    for (i = 0; i < controls.length; i = i + 1) {
+      el = controls[i];
+      if (!usable(el)) continue;
+      key = getKey(el);
+      if (!key || visti[key]) continue;
+      if (!trovaOrigine(datiVecchi, key) && key !== "giorno nascita" && key !== "mese nascita" && key !== "anno nascita") continue;
+      value = valoreCampoLog(el);
+      righe.push("<div><strong>" + escapeHtml(key) + "</strong>: " + escapeHtml(value || "vuoto") + "</div>");
+      visti[key] = true;
+    }
+    box.innerHTML = titoloLog("DATI ASSICURATA") +
+      "<div style=\"font-size:11px;color:#587089;margin-bottom:5px;\">Valori presenti nella pratica nuova prima dell'import dalla vecchia anagrafica.</div>" +
+      (righe.length ? righe.join("") : "<div style=\"color:#587089;\">Nessun dato rilevato prima dell'import.</div>");
+  }
+
   function copia() {
     var controls = allControls();
     var dati = {};
@@ -400,6 +426,7 @@
       return;
     }
     dati = JSON.parse(raw);
+    logDatiAssicurataPrima(dati);
     incollaDataNascitaDiretta(dati, anteprima);
     applicaControlli(dati, fixes);
     confrontaValoriSensibili(dati, avvisi);
@@ -1687,12 +1714,14 @@
 
   function svuotaBoxHud() {
     var logAssicurata = document.getElementById("autoacq_log_assicurata");
+    var logVecchia = document.getElementById("autoacq_log_vecchia");
     var logGenerati = document.getElementById("autoacq_log_generati");
     var warn = document.getElementById("autoacq_warn");
     var fix = document.getElementById("autoacq_fix");
     var crit = document.getElementById("autoacq_crit");
 
     if (logAssicurata) logAssicurata.innerHTML = titoloLog("DATI ASSICURATA") + "<div style=\"color:#587089;\">In attesa di F1/F2.</div>";
+    if (logVecchia) logVecchia.innerHTML = titoloLog("DATI VECCHIA PRATICA") + "<div style=\"color:#587089;\">In attesa di F3.</div>";
     if (logGenerati) logGenerati.innerHTML = titoloLog("DATI GENERATI") + "<div style=\"color:#587089;\">In attesa di incolla o controlli.</div>";
     if (warn) {
       warn.innerHTML = "";
@@ -1723,7 +1752,7 @@
   }
 
   function logCampi(titolo, campi, dati) {
-    var box = document.getElementById("autoacq_log_generati");
+    var box = document.getElementById("autoacq_log_vecchia");
     var righe = [];
     var i;
     var key;
@@ -1735,7 +1764,7 @@
       valore = dati && dati[key] ? (dati[key].text || dati[key].value || "") : "";
       righe.push("<div><strong>" + escapeHtml(key) + "</strong>" + (valore ? ": " + escapeHtml(valore) : "") + "</div>");
     }
-    box.innerHTML = titoloLog("DATI GENERATI") + "<div style=\"font-weight:700;margin-bottom:4px;\">" + escapeHtml(titolo) + " (" + campi.length + ")</div>" + righe.join("");
+    box.innerHTML = titoloLog("DATI VECCHIA PRATICA") + "<div style=\"font-weight:700;margin-bottom:4px;\">" + escapeHtml(titolo) + " (" + campi.length + ")</div>" + righe.join("");
   }
 
   function logTecnico(info) {
@@ -2097,6 +2126,7 @@
     var body;
     var content;
     var logAssicurata;
+    var logVecchia;
     var logGenerati;
     var warn;
     var fix;
@@ -2127,20 +2157,20 @@
     p.style.padding = "0";
     p.style.font = "13px Arial";
     p.style.boxShadow = "0 8px 22px rgba(0,59,102,0.25)";
-    p.style.width = "720px";
+    p.style.width = "820px";
     p.style.height = "500px";
-    p.style.minWidth = "720px";
-    p.style.maxWidth = "720px";
+    p.style.minWidth = "820px";
+    p.style.maxWidth = "820px";
     p.style.overflowX = "hidden";
     p.style.overflowY = "hidden";
 
     function impostaHudRidotta(ridotta) {
       content.style.display = ridotta ? "none" : "block";
       toggle.textContent = ridotta ? "+" : "-";
-      p.style.width = ridotta ? "430px" : "720px";
+      p.style.width = ridotta ? "430px" : "820px";
       p.style.height = ridotta ? "38px" : "500px";
-      p.style.minWidth = ridotta ? "430px" : "720px";
-      p.style.maxWidth = ridotta ? "430px" : "720px";
+      p.style.minWidth = ridotta ? "430px" : "820px";
+      p.style.maxWidth = ridotta ? "430px" : "820px";
       salvaStatoHudRidotta(ridotta);
       aggiornaAltezzaHud();
     }
@@ -2212,10 +2242,12 @@
     body.style.height = "285px";
 
     logAssicurata = creaPannelloLog("autoacq_log_assicurata", "DATI ASSICURATA", "In attesa di F1/F2.");
+    logVecchia = creaPannelloLog("autoacq_log_vecchia", "DATI VECCHIA PRATICA", "In attesa di F3.");
     logGenerati = creaPannelloLog("autoacq_log_generati", "DATI GENERATI", "In attesa di incolla o controlli.");
 
     body.appendChild(riga);
     body.appendChild(logAssicurata);
+    body.appendChild(logVecchia);
     body.appendChild(logGenerati);
     content.appendChild(body);
 
