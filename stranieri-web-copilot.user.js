@@ -1,25 +1,40 @@
 // ==UserScript==
 // @name         Stranieri WEB - Copilot
 // @namespace    stranieri-web-copilot
-// @version      0.21.22
+// @version      0.22.1
 // @description  Assistente operativo per pratiche Stranieri WEB.
-// @author       Jurij Rella
-// @homepageURL  https://github.com/Cloud2129/Stranieri-Web---Copilot
-// @supportURL   https://github.com/Cloud2129/Stranieri-Web---Copilot/issues
-// @updateURL    https://raw.githubusercontent.com/Cloud2129/Stranieri-Web---Copilot/main/stranieri-web-copilot.user.js
-// @downloadURL  https://raw.githubusercontent.com/Cloud2129/Stranieri-Web---Copilot/main/stranieri-web-copilot.user.js
-// @match        http://*/StranieriWeb/*
-// @match        https://*/StranieriWeb/*
+// @include      file:///*
+// @include      http://*/StranieriWeb/*
+// @include      https://*/StranieriWeb/*
 // @run-at       document-end
 // @grant        none
 // ==/UserScript==
 
 (function () {
+  var VERSIONE = "0.22.1";
   var KEY = "STRANIERI_WEB_COPILOT_DATI";
   var KEY_PRIMA_COPIA = "STRANIERI_WEB_COPILOT_PRIMA_COPIA";
   var KEY_LOG_VECCHIA = "STRANIERI_WEB_COPILOT_LOG_VECCHIA";
   var HUD_POS_KEY = "STRANIERI_WEB_COPILOT_HUD_POS";
-  var HUD_MIN_KEY = "STRANIERI_WEB_COPILOT_HUD_MIN";
+  var HUD_OPEN_KEY = "STRANIERI_WEB_COPILOT_HUD_OPEN";
+  var _pillAvvisi = null;
+  var _pillCritici = null;
+
+  // ─── CONFIG ──────────────────────────────────────────────────────────────────
+  var CONFIG = {
+    ufficio: "",
+    passaportoScadutoMesiCritico: 6,
+    checklistExtra: {
+      "lavoro subordinato": [],
+      "lavoro autonomo":    [],
+      "motivi familiari":   [],
+      "attesa occupazione": [],
+      "studente":           [],
+      "protezione":         []
+    }
+  };
+
+  // ─── COSTANTI E DIZIONARIO CAMPI ───────────────────────────────────────────
   var CAMPI = {
     "cognome": ["cognome"],
     "nome": ["nome"],
@@ -55,6 +70,7 @@
     "data scadenza pd": ["datascadenzapd", "data scadenza pd", "data di scadenza della prima dichiarazione"]
   };
 
+  // ─── NORMALIZZAZIONE E RICONOSCIMENTO CAMPI ─────────────────────────────────
   function trim(s) {
     return String(s || "").replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ");
   }
@@ -154,6 +170,13 @@
       return "skip";
     }
 
+    // dataScadenzaRinnovo va sempre calcolata dalle funzioni impostaScadenza*,
+    // non copiata dalla vecchia pratica (altrimenti il loop di incolla
+    // sovrascrive il valore già correttamente impostato da applicaControlloRinnovo)
+    if (norm(el.getAttribute("name") || "") === "datascadenzarinnovo") {
+      return "skip";
+    }
+
     if (title === "autorita che ha rilasciato il documento" && size === "20" && max === "15") {
       if (value === "nessuno" || value === "ordinario" || value === "diplomatico" || value === "servizi special") {
         return "tipo visto";
@@ -181,6 +204,7 @@
     return trim(sel.options[sel.selectedIndex].text);
   }
 
+  // ─── COPIA / INCOLLA ─────────────────────────────────────────────────────────
   function primaCopia() {
     var dati = {
       cognome: valoreCampoPerChiave("cognome") || valoreCampoByName("cognome"),
@@ -434,6 +458,7 @@
     incollaDataNascitaDiretta(dati, anteprima);
     applicaControlli(dati, fixes);
     confrontaValoriSensibili(dati, avvisi);
+    controllaDocumenti(avvisi, critici);
     controls = allControls();
 
     for (i = 0; i < controls.length; i = i + 1) {
@@ -580,6 +605,7 @@
     return 1;
   }
 
+  // ─── CONTROLLI AUTOMATICI ────────────────────────────────────────────────────
   function applicaControlli(dati, fixes) {
     var importo = leggiImportoPagina();
     var mesiValidita = 0;
@@ -847,6 +873,10 @@
     return out;
   }
 
+  function mesiTra(prima, dopo) {
+    return (dopo.getFullYear() - prima.getFullYear()) * 12 + (dopo.getMonth() - prima.getMonth());
+  }
+
   function giorniNelMese(anno, meseZeroBased) {
     return new Date(anno, meseZeroBased + 1, 0).getDate();
   }
@@ -1001,6 +1031,7 @@
     return "";
   }
 
+  // ─── REGOLE PERMESSO ─────────────────────────────────────────────────────────
   function applicaRegolaPermesso(fixes, avvisi, critici, dati) {
     var motivo = document.getElementsByName("motivoSoggiorno")[0] || document.getElementById("motivoSoggiorno");
     var docSoggiorno = document.getElementsByName("docSoggiorno")[0] || document.getElementById("docSoggiorno");
@@ -1022,7 +1053,7 @@
     applicaAutomaticFixRegola(regola, ctx, fixes);
 
     if (!note || !regola.note || !regola.note.length) return;
-    template = creaChecklist(regola.note);
+    template = creaChecklist(regola.note, ctx ? ctx.categoria : "");
     if (trim(note.value)) {
       if (notaChecklistCopilotVuota(note.value)) {
         if (trim(note.value) !== template) {
@@ -1083,6 +1114,13 @@
     if (typeof regola.automaticFix === "function") regola.automaticFix(ctx, fixes);
   }
 
+  function rilevaPrimoRilascio() {
+    var tipo = document.getElementsByName("tipoPratica")[0] || document.getElementById("tipoPratica");
+    if (!tipo) return false;
+    var v = norm(tipo.value + " " + valoreCampo(tipo));
+    return tipo.value === "P" || v.indexOf("primo rilascio") >= 0;
+  }
+
   function creaContestoPermesso(motivo, docSoggiorno, dati) {
     var motivoTesto = valoreCampo(motivo);
     var docTesto = docSoggiorno ? valoreCampo(docSoggiorno) : "";
@@ -1100,7 +1138,12 @@
       aggiornamentoLungoPeriodo30: isAggiornamentoLungoPeriodo30(dati),
       docSoggiorno: docSoggiorno ? docSoggiorno.value : "",
       docTesto: docTesto,
-      lungoPeriodo: !!(docSoggiorno && (docSoggiorno.value === "L" || norm(docTesto).indexOf("perm sogg lungo periodo") >= 0))
+      // Se dati vecchia pratica disponibili, usa il docSoggiorno della vecchia pratica
+      // (il campo corrente potrebbe essere stato incollato erroneamente dal loop di incolla)
+      lungoPeriodo: dati
+        ? permessoPrecedenteLungoPeriodo(dati)
+        : !!(docSoggiorno && (docSoggiorno.value === "L" || norm(docTesto).indexOf("perm sogg lungo periodo") >= 0)),
+      primoRilascio: rilevaPrimoRilascio()
     };
   }
 
@@ -1128,8 +1171,10 @@
     return null;
   }
 
-  function creaChecklist(campi) {
-    return campi.join(" \\ ");
+  function creaChecklist(campi, categoria) {
+    var extra = categoria && CONFIG.checklistExtra[categoria] ? CONFIG.checklistExtra[categoria] : [];
+    var tutti = campi.concat(extra);
+    return tutti.join(" \\ ");
   }
 
   function notaChecklistCopilotVuota(value) {
@@ -1140,6 +1185,11 @@
       "CONVERSIONE DA ASSISTENZA MINORI",
       "PSLP LAV. SUB.",
       "PSLP MOT. FAM.",
+      "LAV. SUB. - PRIMO RILASCIO",
+      "AUTONOMO - PRIMO RILASCIO",
+      "FAM. - PRIMO RILASCIO",
+      "ATT. OCC. - PRIMO RILASCIO",
+      "STUDIO - PRIMO RILASCIO",
       "ATT. OCC.",
       "LAV. SUB.",
       "AUTONOMO",
@@ -1157,6 +1207,46 @@
 
   function campoChecklist(nome) {
     return nome + ": [________]";
+  }
+
+  function guidaPrimoRilascio(codice) {
+    var guide = {
+      "LAV. SUB. - PRIMO RILASCIO": [
+        "Verificare nulla osta lavoro",
+        "Controllare data ingresso dal visto",
+        "Verificare passaporto valido e non scaduto",
+        "Controllare residenza dichiarata",
+        "Verificare tipo contratto"
+      ],
+      "AUTONOMO - PRIMO RILASCIO": [
+        "Verificare autorizzazione attivita' commerciale",
+        "Controllare data ingresso dal visto",
+        "Verificare passaporto valido e non scaduto",
+        "Controllare residenza dichiarata",
+        "Verificare ditta attiva"
+      ],
+      "FAM. - PRIMO RILASCIO": [
+        "Verificare codice fiscale del trainante",
+        "Controllare pratica trainante e scadenza",
+        "Verificare reddito trainante",
+        "Controllare estratti nascita / matrimonio",
+        "Verificare idoneita' alloggio",
+        "Controllare numero familiari a carico"
+      ],
+      "ATT. OCC. - PRIMO RILASCIO": [
+        "Verificare iscrizione al centro per l'impiego",
+        "Controllare data ingresso dal visto",
+        "Verificare passaporto valido e non scaduto",
+        "Controllare residenza dichiarata"
+      ],
+      "STUDIO - PRIMO RILASCIO": [
+        "Verificare iscrizione universitaria o scolastica",
+        "Controllare polizza assicurativa sanitaria",
+        "Verificare mezzi di sostentamento",
+        "Controllare residenza o ospitalita'"
+      ]
+    };
+    return guide[codice] || [];
   }
 
   function regolePermesso() {
@@ -1303,7 +1393,7 @@
       {
         codice: "ATT. OCC.",
         quando: function (ctx) {
-          return ctx.categoria === "attesa occupazione";
+          return ctx.categoria === "attesa occupazione" && !ctx.primoRilascio;
         },
         automaticFix: function (ctx, fixes) {
           impostaValiditaSoggiorno("S", "12 MESI", "Validita soggiorno impostata su 12 MESI per attesa occupazione.", fixes);
@@ -1320,7 +1410,7 @@
       {
         codice: "LAV. SUB.",
         quando: function (ctx) {
-          return ctx.categoria === "lavoro subordinato";
+          return ctx.categoria === "lavoro subordinato" && !ctx.primoRilascio;
         },
         note: [
           "LAV. SUB.",
@@ -1332,7 +1422,7 @@
       {
         codice: "AUTONOMO",
         quando: function (ctx) {
-          return ctx.categoria === "lavoro autonomo";
+          return ctx.categoria === "lavoro autonomo" && !ctx.primoRilascio;
         },
         note: [
           "AUTONOMO",
@@ -1344,7 +1434,7 @@
       {
         codice: "FAM.",
         quando: function (ctx) {
-          return ctx.categoria === "motivi familiari";
+          return ctx.categoria === "motivi familiari" && !ctx.primoRilascio;
         },
         avvisi: [
           "Verificare scadenza trainante."
@@ -1361,7 +1451,7 @@
       {
         codice: "STUDIO",
         quando: function (ctx) {
-          return ctx.categoria === "studente";
+          return ctx.categoria === "studente" && !ctx.primoRilascio;
         },
         note: [
           "STUDIO",
@@ -1370,6 +1460,84 @@
           campoChecklist("ASS. SAN."),
           campoChecklist("ISCRIZ."),
           campoChecklist("ESAMI SUPERATI")
+        ]
+      },
+      {
+        codice: "LAV. SUB. - PRIMO RILASCIO",
+        quando: function (ctx) {
+          return ctx.categoria === "lavoro subordinato" && ctx.primoRilascio;
+        },
+        note: [
+          "LAV. SUB. - PRIMO RILASCIO",
+          campoChecklist("RESIDENZA"),
+          campoChecklist("REDDITO"),
+          campoChecklist("TIPO CONTRATTO"),
+          campoChecklist("NULLA OSTA"),
+          campoChecklist("DATA INGRESSO")
+        ]
+      },
+      {
+        codice: "AUTONOMO - PRIMO RILASCIO",
+        quando: function (ctx) {
+          return ctx.categoria === "lavoro autonomo" && ctx.primoRilascio;
+        },
+        note: [
+          "AUTONOMO - PRIMO RILASCIO",
+          campoChecklist("RESIDENZA"),
+          campoChecklist("REDDITO"),
+          campoChecklist("DITTA ATTIVA"),
+          campoChecklist("DATA INGRESSO")
+        ]
+      },
+      {
+        codice: "FAM. - PRIMO RILASCIO",
+        quando: function (ctx) {
+          return ctx.categoria === "motivi familiari" && ctx.primoRilascio;
+        },
+        avvisi: [
+          "Verificare scadenza trainante."
+        ],
+        note: [
+          "FAM. - PRIMO RILASCIO",
+          campoChecklist("RESIDENZA"),
+          campoChecklist("REDDITO"),
+          campoChecklist("CF TRAINANTE"),
+          campoChecklist("PRATICA TRAINANTE"),
+          campoChecklist("NR FAMILIARI"),
+          campoChecklist("ID. ALLOGGIO"),
+          campoChecklist("ESTRATTI NASCITA/MATRIMONIO")
+        ]
+      },
+      {
+        codice: "ATT. OCC. - PRIMO RILASCIO",
+        quando: function (ctx) {
+          return ctx.categoria === "attesa occupazione" && ctx.primoRilascio;
+        },
+        automaticFix: function (ctx, fixes) {
+          impostaValiditaSoggiorno("S", "12 MESI", "Validita soggiorno impostata su 12 MESI per attesa occupazione.", fixes);
+          ripetiValiditaSoggiorno("S", "12 MESI");
+          impostaScadenzaRinnovoDaOggi(12, "Data scadenza rinnovo calcolata da oggi +12 mesi per attesa occupazione.", fixes);
+        },
+        note: [
+          "ATT. OCC. - PRIMO RILASCIO",
+          campoChecklist("RESIDENZA"),
+          campoChecklist("REDDITO"),
+          campoChecklist("ISCRIZ. CENTRO IMPIEGO"),
+          campoChecklist("DATA INGRESSO")
+        ]
+      },
+      {
+        codice: "STUDIO - PRIMO RILASCIO",
+        quando: function (ctx) {
+          return ctx.categoria === "studente" && ctx.primoRilascio;
+        },
+        note: [
+          "STUDIO - PRIMO RILASCIO",
+          campoChecklist("RES./OSP."),
+          campoChecklist("MEZZI DI SOST."),
+          campoChecklist("ASS. SAN."),
+          campoChecklist("ISCRIZ."),
+          campoChecklist("DATA INGRESSO")
         ]
       }
     ];
@@ -1392,6 +1560,115 @@
     );
   }
 
+  function mostraGuidaPrimoRilascio(regola) {
+    var box = document.getElementById("autoacq_log_generati");
+    var guida = guidaPrimoRilascio(regola.codice);
+    var righe;
+    var i;
+
+    if (!box || !guida || !guida.length) return;
+    righe = ["<ol style=\"margin:4px 0 0 0;padding-left:18px;\">"];
+    for (i = 0; i < guida.length; i = i + 1) {
+      righe.push("<li style=\"margin-bottom:3px;\">" + escapeHtml(guida[i]) + "</li>");
+    }
+    righe.push("</ol>");
+    box.innerHTML += "<div style=\"margin-top:7px;background:#fffbe6;border:1px solid #d97706;border-radius:5px;padding:7px;\">" +
+      "<div style=\"font-weight:800;color:#92400e;margin-bottom:4px;\">Guida primo rilascio</div>" +
+      righe.join("") + "</div>";
+  }
+
+  function controllaDocumenti(avvisi, critici) {
+    var dataPresentazione = document.getElementsByName("dataPresentazione")[0] || document.getElementById("dataPresentazione");
+    var controls = allControls();
+    var i;
+    var el;
+    var title;
+    var dataScadenza;
+    var dataInizio;
+    var diffMesi;
+    var numDoc;
+
+    for (i = 0; i < controls.length; i = i + 1) {
+      el = controls[i];
+      if (!usable(el)) continue;
+      title = norm(el.getAttribute("title") || "");
+      if (
+        title === "data scadenza documento" ||
+        title === "scadenza passaporto" ||
+        title === "data scadenza passaporto"
+      ) {
+        if (!trim(el.value)) continue;
+        dataScadenza = parseDataItaliana(trim(el.value));
+        if (!dataScadenza) continue;
+        dataInizio = (dataPresentazione && trim(dataPresentazione.value))
+          ? parseDataItaliana(dataPresentazione.value)
+          : new Date();
+        if (!dataInizio) dataInizio = new Date();
+        if (dataScadenza < dataInizio) {
+          diffMesi = mesiTra(dataScadenza, dataInizio);
+          if (diffMesi >= CONFIG.passaportoScadutoMesiCritico) {
+            critici.push("Documento scaduto da " + diffMesi + " mesi (oltre la soglia di " + CONFIG.passaportoScadutoMesiCritico + " mesi).");
+            evidenziaCritico(el);
+          } else {
+            avvisi.push("Documento scaduto alla data di presentazione.");
+            evidenziaAvviso(el);
+          }
+        }
+      }
+    }
+
+    numDoc = trovaCampoPagina(["numero documento", "numdoc"]);
+    if (numDoc && !trim(numDoc.value)) {
+      avvisi.push("Numero documento non compilato.");
+      evidenziaAvviso(numDoc);
+    }
+  }
+
+  function controllaPratica() {
+    var avvisi = [];
+    var critici = [];
+    var fixes = [];
+    var ctx = contestoPermessoCorrente();
+    var regola;
+
+    pulisciEvidenziazioni();
+    svuotaBoxHud();
+
+    if (!ctx) {
+      msg("Motivazione del soggiorno non trovata.");
+      return;
+    }
+    if (!ctx.motivoTesto) {
+      msg("Compilare prima il motivo soggiorno per ottenere la checklist corretta.");
+      return;
+    }
+
+    regola = trovaRegolaPermesso(ctx);
+    applicaRegolaPermesso(fixes, avvisi, critici, null);
+    controllaDocumenti(avvisi, critici);
+    controllaBollettinoIntegrativo(critici, null);
+
+    if (ctx.primoRilascio && regola) {
+      mostraGuidaPrimoRilascio(regola);
+    }
+
+    msg(critici.length ? "Controllo completato con avvisi critici." : (avvisi.length ? "Controllo completato con avvisi." : "Controllo completato."));
+    logTecnico({
+      modalita: ctx.primoRilascio ? "Primo rilascio" : "Controllo pratica",
+      stato: critici.length ? "Critico" : (avvisi.length ? "Con avvisi" : "OK"),
+      regola: regola ? regola.codice : "",
+      incollati: [],
+      nonTrovati: [],
+      avvisi: avvisi,
+      critici: critici,
+      fixes: fixes
+    });
+    mostraAvvisi(avvisi);
+    mostraCritici(critici);
+    mostraFixes(fixes);
+  }
+
+  // ─── CHECK FINALE ────────────────────────────────────────────────────────────
   function checkFinale() {
     var avvisi = [];
     var critici = [];
@@ -1408,6 +1685,7 @@
       controllaCoerenzaImportoFinale(avvisi, critici);
       controllaBollettinoIntegrativo(critici, datiSalvati());
       controllaRinnovoFinale(avvisi);
+      controllaDocumenti(avvisi, critici);
     }
 
     msg("Check finale completato: " + avvisi.length + " avvisi, " + critici.length + " critici.");
@@ -1669,6 +1947,7 @@
     registraAnteprima(anteprima, key, prima, valoreCampo(el));
   }
 
+  // ─── EVIDENZIAZIONI ─────────────────────────────────────────────────────────
   function evidenzia(el, stato) {
     var colore = stato === "incollato" ? "#9ff0ad" : "#c5f7ce";
     var bordo = stato === "incollato" ? "#087b2f" : "#159447";
@@ -1727,24 +2006,15 @@
     msg("Evidenziazioni rimosse.");
   }
 
-  function resetCopilot() {
-    localStorage.removeItem(KEY);
-    localStorage.removeItem(KEY_PRIMA_COPIA);
-    localStorage.removeItem(KEY_LOG_VECCHIA);
-    pulisciEvidenziazioni();
-    svuotaBoxHud();
-    msg("Reset completato: dati e clipboard Stranieri WEB - Copilot svuotati.");
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText("").catch(function () {});
-    }
-  }
-
   function nuovaPratica() {
     localStorage.removeItem(KEY);
     localStorage.removeItem(KEY_PRIMA_COPIA);
     localStorage.removeItem(KEY_LOG_VECCHIA);
     pulisciEvidenziazioni();
     svuotaBoxHud();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText("").catch(function () {});
+    }
     msg("Nuova pratica: sessione operativa pulita.");
     logTecnico({
       modalita: "Nuova pratica",
@@ -1755,6 +2025,7 @@
       critici: [],
       fixes: []
     });
+    resetStatoPill();
   }
 
   function svuotaBoxHud() {
@@ -1994,6 +2265,7 @@
       box.innerHTML = "";
       box.style.display = "none";
       aggiornaAltezzaHud();
+      aggiornaStatoPill(avvisi, null);
       return;
     }
     for (i = 0; i < avvisi.length; i = i + 1) {
@@ -2002,6 +2274,7 @@
     box.innerHTML = "<div style=\"font-weight:700;margin-bottom:4px;\">ATTENZIONE:</div><ul style=\"margin:0;padding-left:18px;\">" + righe.join("") + "</ul>";
     box.style.display = "block";
     aggiornaAltezzaHud();
+    aggiornaStatoPill(avvisi, null);
   }
 
   function mostraCritici(critici) {
@@ -2014,6 +2287,7 @@
       box.innerHTML = "";
       box.style.display = "none";
       aggiornaAltezzaHud();
+      aggiornaStatoPill(null, critici);
       return;
     }
     for (i = 0; i < critici.length; i = i + 1) {
@@ -2022,6 +2296,7 @@
     box.innerHTML = "<div style=\"font-weight:700;margin-bottom:4px;\">ATTENZIONE:</div><ul style=\"margin:0;padding-left:18px;\">" + righe.join("") + "</ul>";
     box.style.display = "block";
     aggiornaAltezzaHud();
+    aggiornaStatoPill(null, critici);
   }
 
   function mostraFixes(fixes) {
@@ -2045,20 +2320,10 @@
   }
 
   function aggiornaAltezzaHud() {
-    var hud = document.getElementById("autoacq_hud");
-    var content = document.getElementById("autoacq_content");
-    var warn = document.getElementById("autoacq_warn");
-    var fix = document.getElementById("autoacq_fix");
-    var crit = document.getElementById("autoacq_crit");
-    var aperta;
-
-    if (!hud || !content || content.style.display === "none") return;
-    aperta = (warn && warn.style.display !== "none") ||
-      (fix && fix.style.display !== "none") ||
-      (crit && crit.style.display !== "none");
-    hud.style.height = aperta ? "auto" : "500px";
+    // Gestione altezza automatica nel design a pill
   }
 
+  // ─── UTILITÀ HTML ────────────────────────────────────────────────────────────
   function escapeHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -2101,6 +2366,7 @@
     alert(testo);
   }
 
+  // ─── HUD / PILL ──────────────────────────────────────────────────────────────
   function bottone(testo, fn) {
     var b = document.createElement("button");
     b.type = "button";
@@ -2109,8 +2375,8 @@
     b.style.display = "block";
     b.style.width = "100%";
     b.style.marginTop = "5px";
-    b.style.padding = "6px 7px";
-    b.style.minHeight = "32px";
+    b.style.padding = "4px 5px";
+    b.style.minHeight = "26px";
     b.style.font = "700 11px Arial";
     b.style.lineHeight = "1.15";
     b.style.border = "1px solid #7fa6c9";
@@ -2125,6 +2391,29 @@
     b.onfocus = function () {
       b.blur();
     };
+    return b;
+  }
+
+  function bottoneConTasto(tasto, testo, fn) {
+    var b = bottone("", fn);
+    var badge = document.createElement("span");
+    var label = document.createElement("span");
+    b.style.display = "flex";
+    b.style.alignItems = "center";
+    b.style.textAlign = "left";
+    b.style.gap = "5px";
+    badge.appendChild(document.createTextNode(tasto));
+    badge.style.display = "inline-block";
+    badge.style.flexShrink = "0";
+    badge.style.background = "#003b66";
+    badge.style.color = "#ffffff";
+    badge.style.borderRadius = "3px";
+    badge.style.padding = "1px 4px";
+    badge.style.font = "700 10px Arial";
+    badge.style.lineHeight = "1.4";
+    label.appendChild(document.createTextNode(testo));
+    b.appendChild(badge);
+    b.appendChild(label);
     return b;
   }
 
@@ -2149,40 +2438,13 @@
     return box;
   }
 
-  function salvaStatoHudRidotta(ridotta) {
-    try {
-      localStorage.setItem(HUD_MIN_KEY, ridotta ? "1" : "0");
-    } catch (e1) {}
-    try {
-      sessionStorage.setItem(HUD_MIN_KEY, ridotta ? "1" : "0");
-    } catch (e2) {}
-    try {
-      document.cookie = HUD_MIN_KEY + "=" + (ridotta ? "1" : "0") + "; path=/; max-age=31536000";
-    } catch (e3) {}
-  }
-
-  function leggiStatoHudRidotta() {
-    var m;
-    try {
-      if (localStorage.getItem(HUD_MIN_KEY) === "1") return true;
-    } catch (e1) {}
-    try {
-      if (sessionStorage.getItem(HUD_MIN_KEY) === "1") return true;
-    } catch (e2) {}
-    try {
-      m = String(document.cookie || "").match(new RegExp("(?:^|; )" + HUD_MIN_KEY + "=([^;]*)"));
-      if (m && m[1] === "1") return true;
-    } catch (e3) {}
-    return false;
-  }
-
   function applicaPosizioneHud(p) {
     var raw = localStorage.getItem(HUD_POS_KEY);
     var pos;
 
     p.style.left = "10px";
-    p.style.bottom = "10px";
-    p.style.top = "";
+    p.style.top = "10px";
+    p.style.bottom = "";
     p.style.right = "";
 
     if (!raw) return;
@@ -2194,61 +2456,15 @@
     if (typeof pos.left === "number" && typeof pos.top === "number") {
       p.style.left = Math.max(0, pos.left) + "px";
       p.style.top = Math.max(0, pos.top) + "px";
-      p.style.right = "";
       p.style.bottom = "";
+      p.style.right = "";
+    } else if (typeof pos.left === "number" && typeof pos.bottom === "number") {
+      // legacy: posizione salvata con bottom, reset a default
+      p.style.left = Math.max(0, pos.left) + "px";
+      p.style.top = "10px";
+      p.style.bottom = "";
+      p.style.right = "";
     }
-  }
-
-  function rendiHudMobile(p, header) {
-    var startX = 0;
-    var startY = 0;
-    var startLeft = 0;
-    var startTop = 0;
-    var dragging = false;
-
-    header.style.cursor = "move";
-    header.title = "Trascina per spostare Stranieri WEB - Copilot";
-
-    header.onmousedown = function (eventObject) {
-      eventObject = eventObject || window.event;
-      if (eventObject.target && eventObject.target.tagName && eventObject.target.tagName.toLowerCase() === "button") return;
-      if (eventObject.target && eventObject.target.tagName && eventObject.target.tagName.toLowerCase() === "input") return;
-      dragging = true;
-      startX = eventObject.clientX;
-      startY = eventObject.clientY;
-      startLeft = p.offsetLeft;
-      startTop = p.offsetTop;
-      p.style.left = startLeft + "px";
-      p.style.top = startTop + "px";
-      p.style.right = "";
-      p.style.bottom = "";
-      if (eventObject.preventDefault) eventObject.preventDefault();
-      return false;
-    };
-
-    document.addEventListener("mousemove", function (eventObject) {
-      var left;
-      var top;
-      var maxLeft;
-      var maxTop;
-
-      if (!dragging) return;
-      eventObject = eventObject || window.event;
-      left = startLeft + eventObject.clientX - startX;
-      top = startTop + eventObject.clientY - startY;
-      maxLeft = Math.max(0, window.innerWidth - p.offsetWidth - 6);
-      maxTop = Math.max(0, window.innerHeight - p.offsetHeight - 6);
-      left = Math.min(Math.max(6, left), maxLeft);
-      top = Math.min(Math.max(6, top), maxTop);
-      p.style.left = left + "px";
-      p.style.top = top + "px";
-    });
-
-    document.addEventListener("mouseup", function () {
-      if (!dragging) return;
-      dragging = false;
-      localStorage.setItem(HUD_POS_KEY, JSON.stringify({ left: p.offsetLeft, top: p.offsetTop }));
-    });
   }
 
   function abilitaTastiRapidi() {
@@ -2262,6 +2478,7 @@
       if (key === "F2") azione = incollaPrimaCopia;
       if (key === "F3") azione = copia;
       if (key === "F4") azione = incolla;
+      if (key === "F5") azione = controllaPratica;
       if (!azione) return;
       if (eventObject.preventDefault) eventObject.preventDefault();
       if (eventObject.stopPropagation) eventObject.stopPropagation();
@@ -2270,67 +2487,183 @@
     }, true);
   }
 
+  function aggiornaStatoPill(avvisi, critici) {
+    var pill = document.getElementById("autoacq_pill");
+    var statoEl = document.getElementById("autoacq_pill_stato");
+    var contatore = document.getElementById("autoacq_pill_count");
+    var totale;
+
+    if (avvisi !== null) { _pillAvvisi = avvisi; }
+    if (critici !== null) { _pillCritici = critici; }
+    avvisi = _pillAvvisi;
+    critici = _pillCritici;
+
+    totale = (avvisi ? avvisi.length : 0) + (critici ? critici.length : 0);
+
+    if (!pill || !statoEl) return;
+
+    if (critici && critici.length) {
+      statoEl.style.background = "#dc2626";
+      statoEl.title = critici.length + " avvisi critici";
+    } else if (avvisi && avvisi.length) {
+      statoEl.style.background = "#d97706";
+      statoEl.title = avvisi.length + " avvisi";
+    } else {
+      statoEl.style.background = "#16a34a";
+      statoEl.title = "OK";
+    }
+
+    if (contatore) {
+      contatore.textContent = totale > 0 ? String(totale) : "";
+      contatore.style.display = totale > 0 ? "inline-block" : "none";
+    }
+  }
+
+  function resetStatoPill() {
+    _pillAvvisi = null;
+    _pillCritici = null;
+    aggiornaStatoPill([], []);
+  }
+
   function hud() {
     var host;
-    var p;
-    var m;
-    var riga;
-    var toggle;
+    var pill;
+    var pillTesto;
+    var pillStato;
+    var pillCount;
+    var panel;
     var header;
+    var toggle;
     var body;
     var content;
+    var riga;
     var logAssicurata;
     var logVecchia;
     var logGenerati;
-    var warn;
+    var m;
     var fix;
     var crit;
-    var autore;
+    var warn;
+    var panelAperto = false;
+    var hasMoved = false;
+    var pillToggleBtn;
 
     var esistente = document.getElementById("autoacq_hud");
     if (esistente) {
       if (esistente.getAttribute("data-stranieri-web-copilot") === "1") return;
       if (esistente.parentNode) esistente.parentNode.removeChild(esistente);
     }
+    var pillEsistente = document.getElementById("autoacq_pill");
+    if (pillEsistente && pillEsistente.parentNode) pillEsistente.parentNode.removeChild(pillEsistente);
+
     host = document.body || document.documentElement;
     if (!host) {
       alert("Stranieri WEB - Copilot avviato, ma BODY non disponibile.");
       return;
     }
 
-    p = document.createElement("div");
-    p.id = "autoacq_hud";
-    p.setAttribute("data-stranieri-web-copilot", "1");
-    p.style.position = "fixed";
-    applicaPosizioneHud(p);
-    p.style.zIndex = "2147483647";
-    p.style.background = "rgba(246,250,253,0.98)";
-    p.style.color = "#0f2f4a";
-    p.style.border = "1px solid #2f6f9f";
-    p.style.borderRadius = "8px";
-    p.style.padding = "0";
-    p.style.font = "13px Arial";
-    p.style.boxShadow = "0 8px 22px rgba(0,59,102,0.25)";
-    p.style.width = "790px";
-    p.style.height = "500px";
-    p.style.minWidth = "790px";
-    p.style.maxWidth = "790px";
-    p.style.overflowX = "hidden";
-    p.style.overflowY = "hidden";
+    pill = document.createElement("div");
+    pill.id = "autoacq_pill";
+    pill.style.position = "fixed";
+    pill.style.left = "10px";
+    pill.style.top = "10px";
+    pill.style.zIndex = "2147483647";
+    pill.style.background = "#005c9d";
+    pill.style.color = "#ffffff";
+    pill.style.borderRadius = "20px";
+    pill.style.padding = "6px 12px";
+    pill.style.font = "700 12px Arial";
+    pill.style.display = "flex";
+    pill.style.alignItems = "center";
+    pill.style.gap = "7px";
+    pill.style.cursor = "pointer";
+    pill.style.boxShadow = "0 4px 12px rgba(0,59,102,0.35)";
+    pill.style.userSelect = "none";
+    pill.style.minWidth = "180px";
+    pill.style.flexDirection = "column";
+    pill.style.alignItems = "flex-start";
+    pill.style.gap = "1px";
+    pill.title = "Clicca per aprire Stranieri WEB - Copilot";
+    applicaPosizioneHud(pill);
 
-    function impostaHudRidotta(ridotta) {
-      content.style.display = ridotta ? "none" : "block";
-      toggle.textContent = ridotta ? "+" : "-";
-      p.style.width = ridotta ? "430px" : "790px";
-      p.style.height = ridotta ? "38px" : "500px";
-      p.style.minWidth = ridotta ? "430px" : "790px";
-      p.style.maxWidth = ridotta ? "430px" : "790px";
-      salvaStatoHudRidotta(ridotta);
-      aggiornaAltezzaHud();
-    }
+    // Riga superiore: nome + dot + count
+    var pillRiga = document.createElement("div");
+    pillRiga.style.display = "flex";
+    pillRiga.style.alignItems = "center";
+    pillRiga.style.gap = "7px";
+    pillRiga.style.width = "100%";
 
-    toggle = bottone("-", function () {
-      impostaHudRidotta(content.style.display !== "none");
+    pillTesto = document.createElement("span");
+    pillTesto.appendChild(document.createTextNode("Stranieri WEB - Copilot"));
+    pillRiga.appendChild(pillTesto);
+    pill.appendChild(pillRiga);
+
+    pillStato = document.createElement("span");
+    pillStato.id = "autoacq_pill_stato";
+    pillStato.style.display = "inline-block";
+    pillStato.style.width = "10px";
+    pillStato.style.height = "10px";
+    pillStato.style.borderRadius = "50%";
+    pillStato.style.background = "#16a34a";
+    pillStato.style.flexShrink = "0";
+    pillRiga.appendChild(pillStato);
+
+    pillCount = document.createElement("span");
+    pillCount.id = "autoacq_pill_count";
+    pillCount.style.display = "none";
+    pillCount.style.background = "#dc2626";
+    pillCount.style.color = "#fff";
+    pillCount.style.borderRadius = "10px";
+    pillCount.style.padding = "1px 6px";
+    pillCount.style.font = "700 10px Arial";
+    pillRiga.appendChild(pillCount);
+
+    pillToggleBtn = document.createElement("button");
+    pillToggleBtn.type = "button";
+    pillToggleBtn.appendChild(document.createTextNode("▾"));
+    pillToggleBtn.style.marginLeft = "auto";
+    pillToggleBtn.style.background = "rgba(255,255,255,0.18)";
+    pillToggleBtn.style.border = "none";
+    pillToggleBtn.style.borderRadius = "3px";
+    pillToggleBtn.style.color = "#ffffff";
+    pillToggleBtn.style.font = "bold 13px Arial";
+    pillToggleBtn.style.lineHeight = "1";
+    pillToggleBtn.style.padding = "1px 4px";
+    pillToggleBtn.style.cursor = "pointer";
+    pillToggleBtn.style.outline = "none";
+    pillToggleBtn.style.flexShrink = "0";
+    pillToggleBtn.title = "Apri / chiudi pannello";
+    pillToggleBtn.onfocus = function () { pillToggleBtn.blur(); };
+    pillRiga.appendChild(pillToggleBtn);
+
+    var pillAutore = document.createElement("span");
+    pillAutore.appendChild(document.createTextNode("© Jurij Rella · v" + VERSIONE));
+    pillAutore.style.font = "10px Arial";
+    pillAutore.style.fontWeight = "400";
+    pillAutore.style.opacity = "0.72";
+    pill.appendChild(pillAutore);
+
+    panel = document.createElement("div");
+    panel.id = "autoacq_hud";
+    panel.setAttribute("data-stranieri-web-copilot", "1");
+    panel.style.position = "fixed";
+    panel.style.zIndex = "2147483646";
+    panel.style.background = "rgba(246,250,253,0.98)";
+    panel.style.color = "#0f2f4a";
+    panel.style.border = "1px solid #2f6f9f";
+    panel.style.borderRadius = "8px";
+    panel.style.padding = "0";
+    panel.style.font = "13px Arial";
+    panel.style.boxShadow = "0 8px 22px rgba(0,59,102,0.25)";
+    panel.style.width = "790px";
+    panel.style.minWidth = "790px";
+    panel.style.maxWidth = "790px";
+    panel.style.overflowX = "hidden";
+    panel.style.overflowY = "hidden";
+    panel.style.display = "none";
+
+    toggle = bottone("\u2715", function () {
+      chiudiPanel();
     });
     toggle.style.fontWeight = "700";
     toggle.style.display = "inline-block";
@@ -2340,19 +2673,6 @@
     toggle.style.textAlign = "center";
     toggle.style.borderColor = "#b7d3e8";
     toggle.style.background = "#e6f1fa";
-
-    riga = document.createElement("div");
-    riga.style.display = "block";
-    riga.style.width = "120px";
-    riga.style.minWidth = "120px";
-    riga.style.padding = "6px 0 6px 8px";
-    riga.appendChild(bottone("F1 - Copia da Assicurata", primaCopia));
-    riga.appendChild(bottone("F2 - Incolla ricerca vecchia anagrafica", incollaPrimaCopia));
-    riga.appendChild(bottone("F3 - Copia dati PS precedente", copia));
-    riga.appendChild(bottone("F4 - Incolla su nuova pratica", incolla));
-    riga.appendChild(bottone("Check finale", checkFinale));
-    riga.appendChild(bottone("Nuova pratica", nuovaPratica));
-    riga.appendChild(bottone("Reset", resetCopilot));
 
     header = document.createElement("div");
     header.style.background = "#005c9d";
@@ -2366,34 +2686,32 @@
     header.style.gap = "8px";
     header.style.whiteSpace = "nowrap";
     header.appendChild(document.createTextNode("Stranieri WEB - Copilot"));
-    autore = document.createElement("span");
-    autore.appendChild(document.createTextNode("\u00A9 Jurij Rella"));
-    autore.style.font = "11px Arial";
-    autore.style.fontWeight = "400";
-    autore.style.marginLeft = "auto";
-    autore.style.opacity = "0.88";
-    header.appendChild(autore);
+    toggle.style.marginLeft = "auto";
     header.appendChild(toggle);
-    p.appendChild(header);
-    rendiHudMobile(p, header);
+    panel.appendChild(header);
 
     content = document.createElement("div");
     content.id = "autoacq_content";
     content.style.display = "block";
-    if (leggiStatoHudRidotta()) {
-      content.style.display = "none";
-      toggle.textContent = "+";
-      p.style.width = "430px";
-      p.style.height = "38px";
-      p.style.minWidth = "430px";
-      p.style.maxWidth = "430px";
-    }
 
     body = document.createElement("div");
     body.style.display = "flex";
     body.style.alignItems = "stretch";
     body.style.gap = "8px";
     body.style.height = "285px";
+
+    riga = document.createElement("div");
+    riga.style.display = "block";
+    riga.style.width = "120px";
+    riga.style.minWidth = "120px";
+    riga.style.padding = "6px 0 6px 8px";
+    riga.appendChild(bottoneConTasto("F1", "Copia da Assicurata", primaCopia));
+    riga.appendChild(bottoneConTasto("F2", "Incolla vecchia anagrafica", incollaPrimaCopia));
+    riga.appendChild(bottoneConTasto("F3", "Copia dati PS precedente", copia));
+    riga.appendChild(bottoneConTasto("F4", "Incolla su nuova pratica", incolla));
+    riga.appendChild(bottoneConTasto("F5", "Controlla pratica", controllaPratica));
+    riga.appendChild(bottone("Check finale", checkFinale));
+    riga.appendChild(bottone("Nuova pratica", nuovaPratica));
 
     logAssicurata = creaPannelloLog("autoacq_log_assicurata", "DATI ASSICURATA", "In attesa di F1/F2.", false);
     logVecchia = creaPannelloLog("autoacq_log_vecchia", "DATI VECCHIA PRATICA", "In attesa di F3.", false);
@@ -2409,15 +2727,17 @@
     m.id = "autoacq_msg";
     m.appendChild(document.createTextNode("pronto"));
     m.style.display = "block";
-    m.style.margin = "8px 8px 6px 8px";
-    m.style.padding = "6px 7px";
-    m.style.background = "#eaf3fb";
-    m.style.border = "1px solid #c6dced";
-    m.style.borderRadius = "5px";
+    m.style.margin = "6px 8px 4px 8px";
+    m.style.padding = "3px 7px";
+    m.style.background = "transparent";
+    m.style.border = "none";
+    m.style.borderTop = "1px solid #c6dced";
+    m.style.borderRadius = "0";
     m.style.whiteSpace = "normal";
     m.style.lineHeight = "1.35";
-    m.style.color = "#0f2f4a";
-    m.style.height = "28px";
+    m.style.color = "#4a6a84";
+    m.style.font = "italic 11px Arial";
+    m.style.height = "22px";
     m.style.overflowY = "auto";
     content.appendChild(m);
 
@@ -2432,7 +2752,6 @@
     fix.style.color = "#14532d";
     fix.style.font = "12px Arial";
     fix.style.lineHeight = "1.35";
-    fix.style.overflowY = "visible";
     content.appendChild(fix);
 
     crit = document.createElement("div");
@@ -2446,7 +2765,6 @@
     crit.style.color = "#7f1d1d";
     crit.style.font = "12px Arial";
     crit.style.lineHeight = "1.35";
-    crit.style.overflowY = "visible";
     content.appendChild(crit);
 
     warn = document.createElement("div");
@@ -2460,11 +2778,144 @@
     warn.style.color = "#7c2d12";
     warn.style.font = "12px Arial";
     warn.style.lineHeight = "1.35";
-    warn.style.overflowY = "visible";
     content.appendChild(warn);
-    p.appendChild(content);
 
-    host.insertBefore(p, host.firstChild);
+    panel.appendChild(content);
+
+    function aggiornaPillToggle() {
+      if (pillToggleBtn) {
+        pillToggleBtn.textContent = panelAperto ? "▴" : "▾";
+        pillToggleBtn.title = panelAperto ? "Chiudi pannello" : "Apri pannello";
+      }
+    }
+
+    function apriPanel() {
+      var pillRect = pill.getBoundingClientRect();
+      panel.style.display = "block";
+      panel.style.left = Math.max(6, pillRect.left) + "px";
+      panel.style.top = (pillRect.bottom + 8) + "px";
+      panel.style.bottom = "";
+      panel.style.right = "";
+      panelAperto = true;
+      aggiornaPillToggle();
+      localStorage.setItem(HUD_OPEN_KEY, "1");
+    }
+
+    function chiudiPanel() {
+      panel.style.display = "none";
+      panelAperto = false;
+      aggiornaPillToggle();
+      localStorage.removeItem(HUD_OPEN_KEY);
+    }
+
+    pillToggleBtn.onclick = function (e) {
+      e.stopPropagation();
+      if (panelAperto) { chiudiPanel(); } else { apriPanel(); }
+    };
+
+    pill.addEventListener("click", function () {
+      if (hasMoved) { hasMoved = false; return; }
+      if (panelAperto) {
+        chiudiPanel();
+      } else {
+        apriPanel();
+      }
+    });
+
+    (function () {
+      var dragging = false;
+      var startX = 0;
+      var startY = 0;
+      var startLeft = 0;
+      var startTop = 0;
+
+      pill.addEventListener("mousedown", function (e) {
+        if (e.target.tagName && e.target.tagName.toLowerCase() === "button") return;
+        dragging = true;
+        hasMoved = false;
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = pill.offsetLeft;
+        startTop = pill.offsetTop;
+        e.preventDefault();
+      });
+
+      document.addEventListener("mousemove", function (e) {
+        var left;
+        var top;
+        if (!dragging) return;
+        if (Math.abs(e.clientX - startX) > 4 || Math.abs(e.clientY - startY) > 4) { hasMoved = true; }
+        left = startLeft + e.clientX - startX;
+        top = startTop + e.clientY - startY;
+        left = Math.min(Math.max(6, left), window.innerWidth - pill.offsetWidth - 6);
+        top = Math.min(Math.max(6, top), window.innerHeight - pill.offsetHeight - 6);
+        pill.style.left = left + "px";
+        pill.style.top = top + "px";
+        pill.style.bottom = "";
+        pill.style.right = "";
+        if (panelAperto) {
+          panel.style.left = Math.max(6, left) + "px";
+          panel.style.top = (top + pill.offsetHeight + 8) + "px";
+          panel.style.bottom = "";
+          panel.style.right = "";
+        }
+      });
+
+      document.addEventListener("mouseup", function () {
+        if (!dragging) return;
+        dragging = false;
+        localStorage.setItem(HUD_POS_KEY, JSON.stringify({ left: pill.offsetLeft, top: pill.offsetTop }));
+      });
+    }());
+
+    // Drag dalla barra blu — sposta pill + pannello insieme
+    (function () {
+      var dragging = false;
+      var startX = 0;
+      var startY = 0;
+      var startPanelLeft = 0;
+      var startPanelTop = 0;
+
+      header.style.cursor = "move";
+
+      header.addEventListener("mousedown", function (e) {
+        if (e.target.tagName && e.target.tagName.toLowerCase() === "button") return;
+        dragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        startPanelLeft = panel.offsetLeft;
+        startPanelTop = panel.offsetTop;
+        e.preventDefault();
+      });
+
+      document.addEventListener("mousemove", function (e) {
+        var left, panelTop, pillTop;
+        if (!dragging) return;
+        left = startPanelLeft + e.clientX - startX;
+        panelTop = startPanelTop + e.clientY - startY;
+        left = Math.min(Math.max(6, left), window.innerWidth - panel.offsetWidth - 6);
+        panelTop = Math.min(Math.max(pill.offsetHeight + 14, panelTop), window.innerHeight - panel.offsetHeight - 6);
+        pillTop = panelTop - pill.offsetHeight - 8;
+        panel.style.left = left + "px";
+        panel.style.top = panelTop + "px";
+        panel.style.bottom = "";
+        panel.style.right = "";
+        pill.style.left = left + "px";
+        pill.style.top = pillTop + "px";
+        pill.style.bottom = "";
+        pill.style.right = "";
+      });
+
+      document.addEventListener("mouseup", function () {
+        if (!dragging) return;
+        dragging = false;
+        localStorage.setItem(HUD_POS_KEY, JSON.stringify({ left: pill.offsetLeft, top: pill.offsetTop }));
+      });
+    }());
+
+    host.insertBefore(panel, host.firstChild);
+    host.insertBefore(pill, host.firstChild);
+    if (localStorage.getItem(HUD_OPEN_KEY) === "1") { apriPanel(); }
     abilitaTastiRapidi();
   }
 
