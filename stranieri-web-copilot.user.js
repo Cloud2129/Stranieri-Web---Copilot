@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stranieri WEB - Copilot
 // @namespace    stranieri-web-copilot
-// @version      0.21.12
+// @version      0.21.22
 // @description  Assistente operativo per pratiche Stranieri WEB.
 // @author       Jurij Rella
 // @homepageURL  https://github.com/Cloud2129/Stranieri-Web---Copilot
@@ -409,6 +409,7 @@
     if (!raw) {
       applicaControlli(null, fixes);
       applicaRegolaPermesso(fixes, avvisi, critici, null);
+      controllaBollettinoIntegrativo(critici, null);
       ctxPermesso = contestoPermessoCorrente();
       regolaPermesso = ctxPermesso ? trovaRegolaPermesso(ctxPermesso) : null;
       msg("Modalita senza vecchia pratica: controlli e note applicati sulla pratica nuova.");
@@ -503,6 +504,7 @@
           evidenzia(el, "incollato");
           if (incollati.indexOf(key) < 0) incollati.push(key);
           registraAnteprima(anteprima, key, prima, valoreCampoLog(el));
+          if (key === "stato civile") controllaCambioStatoCivile(el, prima, valoreCampoLog(el), avvisi);
         }
       } else if (origine.checked !== undefined) {
         el.checked = origine.checked;
@@ -510,19 +512,22 @@
         evidenzia(el, "incollato");
         if (incollati.indexOf(key) < 0) incollati.push(key);
         registraAnteprima(anteprima, key, prima, valoreCampoLog(el));
+        if (key === "stato civile") controllaCambioStatoCivile(el, prima, valoreCampoLog(el), avvisi);
       } else {
         el.value = origine.value || "";
         ok = ok + 1;
         evidenzia(el, "incollato");
         if (incollati.indexOf(key) < 0) incollati.push(key);
         registraAnteprima(anteprima, key, prima, valoreCampoLog(el));
+        if (key === "stato civile") controllaCambioStatoCivile(el, prima, valoreCampoLog(el), avvisi);
       }
       fire(el);
     }
     applicaRegolaPermesso(fixes, avvisi, critici, dati);
+    controllaBollettinoIntegrativo(critici, dati);
     ctxPermesso = contestoPermessoCorrente(dati);
     regolaPermesso = ctxPermesso ? trovaRegolaPermesso(ctxPermesso) : null;
-    msg("Incollati " + ok + " campi. Non trovati " + missing + ".");
+    msg(critici.length ? "Controllo completato con avvisi critici." : (avvisi.length ? "Controllo completato con avvisi." : "Incolla completato."));
     logTecnico({
       modalita: "Con vecchia pratica",
       stato: critici.length ? "Critico" : (avvisi.length ? "Con avvisi" : "OK"),
@@ -606,6 +611,19 @@
     }
 
     applicaControlloRinnovo(mesiValidita, fixes);
+  }
+
+  function controllaBollettinoIntegrativo(critici, dati) {
+    var motivo = document.getElementsByName("motivoSoggiorno")[0] || document.getElementById("motivoSoggiorno");
+    var categoria;
+
+    if (leggiImportoPagina() !== "30,46" || !motivo) return;
+    if (tipoPraticaCorrente() === "A") return;
+    if (permessoPrecedenteLungoPeriodo(dati || datiSalvati())) return;
+    categoria = categoriaMotivo(valoreCampo(motivo));
+    if (categoria !== "lavoro subordinato" && categoria !== "lavoro autonomo" && categoria !== "motivi familiari") return;
+    critici.push("Bollettino 30,46 su pratica da acquisire con motivazione lavoro/famiglia: manca bollettino da 40/50 euro.");
+    evidenziaCritico(motivo);
   }
 
   function leggiImportoPagina() {
@@ -853,6 +871,13 @@
     evidenziaAvviso(el);
   }
 
+  function controllaCambioStatoCivile(el, prima, dopo, avvisi) {
+    if (!prima || !dopo) return;
+    if (normConfronto(prima) === normConfronto(dopo)) return;
+    avvisi.push("Stato civile cambiato. Prima: " + prima + " | Dopo: " + dopo + ".");
+    evidenziaAvviso(el);
+  }
+
   function controllaMotivoSoggiorno(el, origine, avvisi, critici) {
     var attuale = valoreCampo(el);
     var nuovo = origine.text || origine.value || "";
@@ -901,6 +926,13 @@
   function motivoFamiliareUEArt10(value) {
     var testo = norm(value);
     return testo.indexOf("familiare ue art 10") >= 0 || testo.indexOf("uea10") >= 0;
+  }
+
+  function motivoFamiliareUE(value) {
+    var testo = norm(value);
+    return testo.indexOf("familiare ue") >= 0 ||
+      testo.indexOf("uea10") >= 0 ||
+      testo.indexOf("uea20") >= 0;
   }
 
   function motivoAssistenzaMinori(value) {
@@ -1374,6 +1406,7 @@
       if (!regola) avvisi.push("Nessuna regola tecnica riconosciuta per la motivazione selezionata.");
       controllaNoteFinali(regola, avvisi);
       controllaCoerenzaImportoFinale(avvisi, critici);
+      controllaBollettinoIntegrativo(critici, datiSalvati());
       controllaRinnovoFinale(avvisi);
     }
 
@@ -1411,15 +1444,17 @@
     var importo = leggiImportoPagina();
     var dati = datiSalvati();
     var doc = document.getElementsByName("docSoggiorno")[0] || document.getElementById("docSoggiorno");
+    var motivo = document.getElementsByName("motivoSoggiorno")[0] || document.getElementById("motivoSoggiorno");
     var tipo = document.getElementsByName("tipoPratica")[0] || document.getElementById("tipoPratica");
     var validita = document.getElementsByName("validitaSoggiorno")[0] || document.getElementById("validitaSoggiorno");
 
     if (!importo) return;
     if (importo === "30,46" && tipo && tipo.value === "A") {
-      if (!permessoPrecedenteLungoPeriodo(dati)) {
-        critici.push("Importo 30,46 con aggiornamento: il permesso precedente non risulta PERM. SOGG. LUNGO PERIODO.");
+      if (motivo && motivoFamiliareUE(valoreCampo(motivo))) return;
+      if (!permessoPrecedenteLungoPeriodo(dati) || !selectFinaleValido(doc, "L", "PERM. SOGG. LUNGO PERIODO")) {
+        critici.push("Importo 30,46 con aggiornamento: verificare che il permesso precedente e il documento soggiorno siano PERM. SOGG. LUNGO PERIODO.");
+        if (doc) evidenziaCritico(doc);
       }
-      verificaSelectFinale(doc, "L", "PERM. SOGG. LUNGO PERIODO", "Importo 30,46 con aggiornamento: documento soggiorno non impostato su PERM. SOGG. LUNGO PERIODO.", critici, true);
       verificaSelectFinale(validita, "Y", "10 ANNI", "Importo 30,46 con aggiornamento: validita soggiorno non impostata su 10 ANNI.", avvisi);
       controllaDataRinnovoDaPresentazioneFinale(avvisi);
       controllaScadenzaDaPresentazioneFinale(120, avvisi);
@@ -1456,6 +1491,11 @@
     lista.push(messaggio);
     if (critico) evidenziaCritico(el);
     else evidenziaAvviso(el);
+  }
+
+  function selectFinaleValido(el, value, testo) {
+    if (!el) return false;
+    return el.value === value || norm(valoreCampo(el)) === norm(testo);
   }
 
   function controllaRinnovoFinale(avvisi) {
@@ -1727,7 +1767,7 @@
 
     if (logAssicurata) logAssicurata.innerHTML = titoloLog("DATI ASSICURATA") + "<div style=\"color:#587089;\">In attesa di F1/F2.</div>";
     if (logVecchia) logVecchia.innerHTML = titoloLog("DATI VECCHIA PRATICA") + "<div style=\"color:#587089;\">In attesa di F3.</div>";
-    if (logGenerati) logGenerati.innerHTML = titoloLog("DATI GENERATI") + "<div style=\"color:#587089;\">In attesa di incolla o controlli.</div>";
+    if (logGenerati) logGenerati.innerHTML = titoloLog("DATI GENERATI", true) + "<div style=\"color:#587089;\">In attesa di incolla o controlli.</div>";
     if (warn) {
       warn.innerHTML = "";
       warn.style.display = "none";
@@ -1820,19 +1860,12 @@
     var titolo = info.titolo || (info.modalita === "Con vecchia pratica" ? "Dati Incollati" : "Report lavorazione");
 
     if (!box) return;
-    righe.push(titoloLog("DATI GENERATI"));
+    righe.push(titoloLog("DATI GENERATI", true));
     righe.push("<div style=\"font-weight:700;margin-bottom:5px;color:#003b66;\">" + escapeHtml(titolo) + "</div>");
     righe.push(rigaLog("Modalita", info.modalita || ""));
-    righe.push(rigaLog("Stato", info.stato || ""));
     if (info.regola) righe.push(rigaLog("Regola", info.regola));
-    righe.push(rigaLog("Campi incollati", String(incollati.length)));
-    righe.push(rigaLog("Campi non trovati", String(nonTrovati.length)));
-    righe.push(rigaLog("Avvisi", String(avvisi.length)));
-    righe.push(rigaLog("Critici", String(critici.length)));
-    righe.push(rigaLog("Automatic-Fix", String(fixes.length)));
     if (anteprima.length) righe.push(rigaAnteprimaLog(anteprima));
     if (nonTrovati.length) righe.push(rigaListaLog("Non trovati", nonTrovati));
-    if (incollati.length) righe.push(rigaListaLog("Incollati", incollati.slice(0, 12)));
     box.innerHTML = righe.join("");
   }
 
@@ -1840,7 +1873,10 @@
     return "<div><strong>" + escapeHtml(label) + "</strong>: " + escapeHtml(value) + "</div>";
   }
 
-  function titoloLog(testo) {
+  function titoloLog(testo, evidenza) {
+    if (evidenza) {
+      return "<div style=\"font-weight:800;margin:-1px -1px 7px -1px;color:#ffffff;background:#006eb6;border-radius:4px;padding:5px 7px;letter-spacing:0;font-size:13px;\">OUTPUT COPILOT - " + escapeHtml(testo) + "</div>";
+    }
     return "<div style=\"font-weight:700;margin-bottom:6px;color:#003b66;border-bottom:1px solid #d7e7f3;padding-bottom:4px;\">" + escapeHtml(testo) + "</div>";
   }
 
@@ -1850,25 +1886,102 @@
 
   function rigaAnteprimaLog(items) {
     var righe = [];
+    var visto = [];
+    var trainante = [];
+    var durata = [];
     var i;
     var item;
     var max = Math.min(items.length, 10);
 
-    for (i = 0; i < max; i = i + 1) {
+    for (i = 0; i < items.length; i = i + 1) {
       item = items[i];
+      if (campoVisto(item.campo)) {
+        visto.push(item);
+      } else if (campoTrainante(item.campo)) {
+        trainante.push(item);
+      } else if (campoDurataPs(item.campo)) {
+        durata.push(item);
+      }
+    }
+    if (visto.length) righe.push(rigaGruppoAnteprima("DATI VISTO", visto));
+    if (trainante.length) righe.push(rigaGruppoAnteprima("TRAINANTE", trainante));
+    if (durata.length) righe.push(rigaGruppoAnteprima("MOTIVO E DURATA PS", durata));
+
+    for (i = 0; i < items.length && righe.length < max + (visto.length ? 1 : 0) + (trainante.length ? 1 : 0) + (durata.length ? 1 : 0); i = i + 1) {
+      item = items[i];
+      if (campoVisto(item.campo)) continue;
+      if (campoTrainante(item.campo)) continue;
+      if (campoDurataPs(item.campo)) continue;
       righe.push("<div style=\"border-top:1px solid #d7e7f3;padding:4px 0;\">" +
-        "<div><strong>" + escapeHtml(item.campo) + "</strong> <span style=\"color:#587089;\">(" + escapeHtml(item.tipo) + ")</span></div>" +
+        "<div><strong>" + escapeHtml(etichettaCampoAnteprima(item.campo)) + "</strong> <span style=\"color:#587089;\">(" + escapeHtml(item.tipo) + ")</span></div>" +
         "<div style=\"font-size:11px;color:#6b7280;\">Prima: " + escapeHtml(item.prima || "vuoto") + "</div>" +
         "<div style=\"font-size:11px;color:#0f5f2a;\">Dopo: " + escapeHtml(item.dopo || "vuoto") + "</div>" +
         "</div>");
     }
-    if (items.length > max) {
-      righe.push("<div style=\"font-size:11px;color:#587089;margin-top:3px;\">Altri campi modificati: " + escapeHtml(String(items.length - max)) + "</div>");
-    }
-    return "<div style=\"margin-top:7px;background:#f7fbff;border:1px solid #c6dced;border-radius:5px;padding:6px;\">" +
-      "<div style=\"font-weight:700;margin-bottom:3px;\">Anteprima modifiche</div>" +
+    return "<div style=\"margin-top:7px;background:#ffffff;border:1px solid #8cc5ec;border-radius:5px;padding:7px;box-shadow:0 1px 3px rgba(0,80,140,0.12);\">" +
+      "<div style=\"font-weight:800;margin-bottom:4px;color:#005c9d;\">Anteprima modifiche</div>" +
       righe.join("") +
       "</div>";
+  }
+
+  function campoVisto(campo) {
+    return campo === "data frontiera" ||
+      campo === "frontiera" ||
+      campo === "tipo visto" ||
+      campo === "numero visto" ||
+      campo === "data visto" ||
+      campo === "data scadenza visto" ||
+      campo === "visto rilasciato da" ||
+      campo === "motivo visto";
+  }
+
+  function campoTrainante(campo) {
+    return campo === "stato civile" ||
+      campo === "coniuge" ||
+      campo === "referenze";
+  }
+
+  function campoDurataPs(campo) {
+    return campo === "motivo soggiorno" ||
+      campo === "data prima dichiarazione" ||
+      campo === "data scadenza pd";
+  }
+
+  function rigaGruppoAnteprima(titolo, items) {
+    var righe = [];
+    var i;
+    var item;
+
+    for (i = 0; i < items.length; i = i + 1) {
+      item = items[i];
+      righe.push("<div style=\"padding:3px 0;border-top:1px solid #d7e7f3;\">" +
+        "<strong>" + escapeHtml(etichettaCampoAnteprima(item.campo)) + "</strong>" +
+        "<div style=\"font-size:11px;color:#6b7280;\">Prima: " + escapeHtml(item.prima || "vuoto") + "</div>" +
+        "<div style=\"font-size:11px;color:#0f5f2a;\">Dopo: " + escapeHtml(item.dopo || "vuoto") + "</div>" +
+        "</div>");
+    }
+    return "<div style=\"margin-top:5px;border:1px solid #b7d3e8;background:#f7fbff;border-radius:5px;padding:6px;\">" +
+      "<div style=\"font-weight:800;color:#003b66;margin-bottom:3px;\">" + escapeHtml(titolo) + "</div>" +
+      righe.join("") +
+      "</div>";
+  }
+
+  function etichettaCampoAnteprima(campo) {
+    if (campo === "data prima dichiarazione") {
+      return praticaRinnovoOAggiornamento() ? "data rinnovo" : "data presentazione istanza";
+    }
+    if (campo === "data scadenza pd") return "data scadenza ps";
+    return campo;
+  }
+
+  function praticaRinnovoOAggiornamento() {
+    var tipo = document.getElementsByName("tipoPratica")[0] || document.getElementById("tipoPratica");
+    var testo;
+
+    if (!tipo) return false;
+    if (tipo.value === "R" || tipo.value === "A") return true;
+    testo = valoreCampo(tipo);
+    return norm(testo).indexOf("rinnovo") >= 0 || norm(testo).indexOf("aggiornamento") >= 0;
   }
 
   function mostraAvvisi(avvisi) {
@@ -2015,10 +2128,10 @@
     return b;
   }
 
-  function creaPannelloLog(id, titolo, placeholder) {
+  function creaPannelloLog(id, titolo, placeholder, evidenza) {
     var box = document.createElement("div");
     box.id = id;
-    box.style.flex = "1 1 0";
+    box.style.flex = evidenza ? "2 1 0" : "1 1 0";
     box.style.minWidth = "0";
     box.style.margin = "6px 8px 6px 0";
     box.style.padding = "7px";
@@ -2026,13 +2139,13 @@
     box.style.maxHeight = "261px";
     box.style.overflowY = "auto";
     box.style.overflowX = "hidden";
-    box.style.background = "#ffffff";
-    box.style.border = "1px solid #c6dced";
+    box.style.background = evidenza ? "#f1f8ff" : "#ffffff";
+    box.style.border = evidenza ? "2px solid #2f8ac7" : "1px solid #c6dced";
     box.style.borderRadius = "5px";
-    box.style.font = "12px Arial";
+    box.style.font = evidenza ? "12.5px Arial" : "12px Arial";
     box.style.lineHeight = "1.35";
     box.style.color = "#0f2f4a";
-    box.innerHTML = titoloLog(titolo) + "<div style=\"color:#587089;\">" + escapeHtml(placeholder) + "</div>";
+    box.innerHTML = titoloLog(titolo, evidenza) + "<div style=\"color:#587089;\">" + escapeHtml(placeholder) + "</div>";
     return box;
   }
 
@@ -2198,20 +2311,20 @@
     p.style.padding = "0";
     p.style.font = "13px Arial";
     p.style.boxShadow = "0 8px 22px rgba(0,59,102,0.25)";
-    p.style.width = "820px";
+    p.style.width = "790px";
     p.style.height = "500px";
-    p.style.minWidth = "820px";
-    p.style.maxWidth = "820px";
+    p.style.minWidth = "790px";
+    p.style.maxWidth = "790px";
     p.style.overflowX = "hidden";
     p.style.overflowY = "hidden";
 
     function impostaHudRidotta(ridotta) {
       content.style.display = ridotta ? "none" : "block";
       toggle.textContent = ridotta ? "+" : "-";
-      p.style.width = ridotta ? "430px" : "820px";
+      p.style.width = ridotta ? "430px" : "790px";
       p.style.height = ridotta ? "38px" : "500px";
-      p.style.minWidth = ridotta ? "430px" : "820px";
-      p.style.maxWidth = ridotta ? "430px" : "820px";
+      p.style.minWidth = ridotta ? "430px" : "790px";
+      p.style.maxWidth = ridotta ? "430px" : "790px";
       salvaStatoHudRidotta(ridotta);
       aggiornaAltezzaHud();
     }
@@ -2230,12 +2343,12 @@
 
     riga = document.createElement("div");
     riga.style.display = "block";
-    riga.style.width = "145px";
-    riga.style.minWidth = "145px";
+    riga.style.width = "120px";
+    riga.style.minWidth = "120px";
     riga.style.padding = "6px 0 6px 8px";
     riga.appendChild(bottone("F1 - Copia da Assicurata", primaCopia));
-    riga.appendChild(bottone("F2 - Ricerca vecchia anagrafica", incollaPrimaCopia));
-    riga.appendChild(bottone("F3 - Copia dati da Vecchia Anagrafica", copia));
+    riga.appendChild(bottone("F2 - Incolla ricerca vecchia anagrafica", incollaPrimaCopia));
+    riga.appendChild(bottone("F3 - Copia dati PS precedente", copia));
     riga.appendChild(bottone("F4 - Incolla su nuova pratica", incolla));
     riga.appendChild(bottone("Check finale", checkFinale));
     riga.appendChild(bottone("Nuova pratica", nuovaPratica));
@@ -2282,9 +2395,9 @@
     body.style.gap = "8px";
     body.style.height = "285px";
 
-    logAssicurata = creaPannelloLog("autoacq_log_assicurata", "DATI ASSICURATA", "In attesa di F1/F2.");
-    logVecchia = creaPannelloLog("autoacq_log_vecchia", "DATI VECCHIA PRATICA", "In attesa di F3.");
-    logGenerati = creaPannelloLog("autoacq_log_generati", "DATI GENERATI", "In attesa di incolla o controlli.");
+    logAssicurata = creaPannelloLog("autoacq_log_assicurata", "DATI ASSICURATA", "In attesa di F1/F2.", false);
+    logVecchia = creaPannelloLog("autoacq_log_vecchia", "DATI VECCHIA PRATICA", "In attesa di F3.", false);
+    logGenerati = creaPannelloLog("autoacq_log_generati", "DATI GENERATI", "In attesa di incolla o controlli.", true);
 
     body.appendChild(riga);
     body.appendChild(logAssicurata);
